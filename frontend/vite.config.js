@@ -6,7 +6,10 @@ export default defineConfig({
   server: {
     port: 5174,
     proxy: {
-      '/api': 'http://localhost:8082'
+      '/api': {
+        target: process.env.VITE_API_URL || 'https://birthday-tracker-qfcv.onrender.com/',
+        changeOrigin: true
+      }
     }
   }
 })
