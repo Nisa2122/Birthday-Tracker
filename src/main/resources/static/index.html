@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Birthday Tracker Dashboard</title>
+    <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+<div class="page-container" id="root">
+    <header>
+        <div>
+            <h1>Birthday Tracker</h1>
+            <p>Dashboard, team banners, weekend highlighting, and SQLite persistence.</p>
+        </div>
+        <a class="logout-button" href="/logout">Logout</a>
+    </header>
+
+    <section class="stats-row" id="stats">
+        <div class="stat-card">
+            <h2>Today</h2>
+            <p id="today-count">0 members</p>
+        </div>
+        <div class="stat-card">
+            <h2>This Week</h2>
+            <p id="week-count">0 members</p>
+        </div>
+        <div class="stat-card">
+            <h2>This Month</h2>
+            <p id="month-count">0 members</p>
+        </div>
+    </section>
+
+    <section class="layout-grid">
+        <article class="panel">
+            <h2>Team Members</h2>
+            <div class="member-list" id="member-list"></div>
+            <button class="primary-button" id="create-banner">Create Birthday Banner</button>
+        </article>
+
+        <article class="panel">
+            <h2>Add / Edit Team Member</h2>
+            <form id="member-form" class="member-form">
+                <label>Name <input id="f-name" required /></label>
+                <label>Team <input id="f-team" required /></label>
+                <label>Birth Date <input id="f-birth" type="date" required /></label>
+                <button class="primary-button" type="submit" id="save-member">Save Member</button>
+                <button type="button" class="secondary-button" id="new-member">New Member</button>
+            </form>
+            <div id="error" class="alert" style="display:none"></div>
+        </article>
+    </section>
+
+    <section class="banner-card" id="banner-card" style="display:none">
+        <h2>Birthday Banner</h2>
+        <p><strong id="b-name"></strong> — <span id="b-team"></span></p>
+        <p id="b-message"></p>
+        <blockquote id="b-quote"></blockquote>
+        <div id="b-next" class="banner-normal"></div>
+    </section>
+</div>
+
+<script>
+const state = {
+  members: [],
+  selectedId: null
+};
+
+function handleAuthError() {
+  window.location.href = '/login.html';
+}
+
+function apiGet(path) {
+  return fetch(path, { credentials: 'same-origin' }).then(r => {
+    if (r.status === 401) throw new Error('Unauthorized');
+    return r.json();
+  });
+}
+
+function apiPost(path, body) {
+  return fetch(path, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body), credentials: 'same-origin' })
+    .then(r => { if (!r.ok) return r.text().then(t => { throw new Error(t||r.statusText) }); return r.json(); });
+}
+
+function apiPut(path, body) {
+  return fetch(path, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body), credentials: 'same-origin' })
+    .then(r => { if (!r.ok) return r.text().then(t => { throw new Error(t||r.statusText) }); return r.json(); });
+}
+
+function apiBanner(id) {
+  return fetch('/api/banner/' + id, { credentials:'same-origin' }).then(r => { if (r.status === 401) throw new Error('Unauthorized'); return r.json(); });
+}
+
+function loadAll() {
+  Promise.all([
+    apiGet('/api/members').catch(e => { handleAuthError(); throw e }),
+    apiGet('/api/members/today').catch(()=>[]),
+    apiGet('/api/members/week').catch(()=>[]),
+    apiGet('/api/members/month').catch(()=>[])
+  ]).then(([members, today, week, month]) => {
+    state.members = members || [];
+    document.getElementById('today-count').textContent = (today||[]).length + ' member' + ((today||[]).length===1?'':'s');
+    document.getElementById('week-count').textContent = (week||[]).length + ' member' + ((week||[]).length===1?'':'s');
+    document.getElementById('month-count').textContent = (month||[]).length + ' member' + ((month||[]).length===1?'':'s');
+    renderMembers();
+  }).catch(err => console.error(err));
+}
+
+function renderMembers() {
+  const container = document.getElementById('member-list');
+  container.innerHTML = '';
+  state.members.forEach(m => {
+    const div = document.createElement('div');
+    const weekend = isWeekendNext(m.birthDate);
+    div.className = weekend ? 'member weekend' : 'member';
+    const label = document.createElement('label');
+    label.style.display = 'flex';
+    label.style.alignItems = 'center';
+    label.style.gap = '12px';
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'selectedMember';
+    radio.checked = state.selectedId === m.id;
+    radio.addEventListener('change', () => { onSelectMember(m); });
+    const info = document.createElement('div');
+    info.innerHTML = `<strong>${escapeHtml(m.name)}</strong><span>${escapeHtml(m.team)}</span><span>Birthday: ${escapeHtml(m.birthDate)}</span>`;
+    label.appendChild(radio);
+    label.appendChild(info);
+    div.appendChild(label);
+    container.appendChild(div);
+  });
+}
+
+function onSelectMember(m) {
+  state.selectedId = m.id;
+  document.getElementById('f-name').value = m.name;
+  document.getElementById('f-team').value = m.team;
+  document.getElementById('f-birth').value = m.birthDate;
+}
+
+function isWeekendNext(birthDate) {
+  const d = new Date(birthDate);
+  const today = new Date();
+  let next = new Date(today.getFullYear(), d.getMonth(), d.getDate());
+  if (next < today) next.setFullYear(today.getFullYear()+1);
+  const day = next.getDay();
+  return day === 0 || day === 6;
+}
+
+function createBanner() {
+  if (!state.selectedId) return showError('Select a member first');
+  apiBanner(state.selectedId).then(b => {
+    document.getElementById('banner-card').style.display = 'block';
+    document.getElementById('b-name').textContent = b.memberName;
+    document.getElementById('b-team').textContent = b.team;
+    document.getElementById('b-message').textContent = b.message;
+    document.getElementById('b-quote').textContent = '“' + b.quote + '”';
+    document.getElementById('b-next').textContent = 'Next birthday: ' + b.nextBirthday + (b.weekend ? ' (Weekend Celebration!)' : '');
+  }).catch(e => { if (e.message === 'Unauthorized') handleAuthError(); else showError(e.message) });
+}
+
+function showError(msg) {
+  const el = document.getElementById('error');
+  el.style.display = 'block';
+  el.textContent = msg;
+}
+
+function clearForm() {
+  state.selectedId = null;
+  document.getElementById('f-name').value = '';
+  document.getElementById('f-team').value = '';
+  document.getElementById('f-birth').value = '';
+  document.getElementById('error').style.display = 'none';
+  renderMembers();
+}
+
+document.getElementById('create-banner').addEventListener('click', createBanner);
+document.getElementById('new-member').addEventListener('click', clearForm);
+
+document.getElementById('member-form').addEventListener('submit', function(e){
+  e.preventDefault();
+  const member = {
+    name: document.getElementById('f-name').value.trim(),
+    team: document.getElementById('f-team').value.trim(),
+    birthDate: document.getElementById('f-birth').value
+  };
+  if (!member.name || !member.birthDate) return showError('Name and birth date required');
+  if (state.selectedId) {
+    apiPut('/api/members/' + state.selectedId, member).then(()=>{ clearForm(); loadAll(); }).catch(e=>showError(e.message));
+  } else {
+    apiPost('/api/members', member).then(()=>{ clearForm(); loadAll(); }).catch(e=>showError(e.message));
+  }
+});
+
+function escapeHtml(s){ return String(s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+loadAll();
+</script>
+</body>
+</html>
